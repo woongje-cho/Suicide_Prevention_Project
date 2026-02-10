@@ -82,3 +82,105 @@ visualization:
   show_fps: true
   save_alert_frames: true
   save_dir: "alert_captures"
+
+# ============================================================
+# LiDAR (RPLidar A1/A2)
+# ============================================================
+lidar:
+  enabled: true
+  port: "/dev/ttyUSB0"           # Linux/Jetson 시리얼 포트
+  baudrate: 115200
+  scan_mode: 0                   # 0=Standard, 1=Express, 2=Boost
+  max_range_m: 12.0
+  min_range_m: 0.15
+  scan_frequency_hz: 10
+  obstacle_threshold_m: 0.5     # 장애물 감지 거리 임계값
+  safety_zone_m: 0.3            # 긴급 정지 거리
+
+# ============================================================
+# 센서 퓨전 (카메라 + LiDAR + 깊이)
+# ============================================================
+sensor_fusion:
+  enabled: true
+  camera_lidar_offset:           # 카메라↔LiDAR 상대 위치 (m)
+    x: 0.0
+    y: 0.0
+    z: 0.15
+  fusion_method: "weighted"      # "weighted" | "kalman"
+  depth_weight: 0.4
+  lidar_weight: 0.6
+  max_association_distance_m: 1.0
+
+# ============================================================
+# GPS (NMEA over Serial)
+# ============================================================
+gps:
+  enabled: true
+  port: "/dev/ttyACM0"
+  baudrate: 9600
+  update_rate_hz: 1
+  min_satellites: 4
+  default_latitude: 37.5135     # 마포대교 기본 좌표 (GPS 미수신 시)
+  default_longitude: 126.9440
+
+# ============================================================
+# 모터 제어 (DC 모터 / PWM)
+# ============================================================
+motor:
+  enabled: true
+  left_pin_forward: 17
+  left_pin_backward: 27
+  right_pin_forward: 22
+  right_pin_backward: 23
+  left_pwm_pin: 12
+  right_pwm_pin: 13
+  pwm_frequency: 1000
+  max_speed: 100                 # PWM 듀티비 (%)
+  patrol_speed: 60
+  approach_speed: 30
+  turn_speed: 45
+
+# ============================================================
+# 내비게이션 / 순찰
+# ============================================================
+navigation:
+  enabled: true
+  mode: "patrol"                 # "patrol" | "manual" | "standby"
+  patrol_waypoints:              # GPS 좌표 기반 순찰 경유지
+    - name: "start"
+      latitude: 37.5135
+      longitude: 126.9440
+    - name: "mid_east"
+      latitude: 37.5136
+      longitude: 126.9455
+    - name: "end_east"
+      latitude: 37.5137
+      longitude: 126.9470
+    - name: "mid_west"
+      latitude: 37.5134
+      longitude: 126.9425
+  waypoint_reach_radius_m: 2.0
+  patrol_loop: true
+  pause_on_detection: true       # 사람 감지 시 순찰 일시정지
+  pause_duration_s: 120          # 감지 후 정지 유지 시간
+
+# ============================================================
+# 행동 임계값 (로봇 반응 결정)
+# ============================================================
+behavior:
+  approach_risk_level: "WARNING"     # 이 수준 이상이면 접근
+  approach_distance_m: 3.0           # 대상까지 접근 거리
+  speak_risk_level: "WARNING"        # 이 수준 이상이면 TTS 재생
+  emergency_call_level: "CRITICAL"   # 이 수준 이상이면 긴급 전화
+  retreat_after_safe_s: 30           # SAFE 전환 후 후퇴까지 대기 시간
+  max_approach_attempts: 3
+
+# ============================================================
+# TTS (Text-to-Speech) 설정
+# ============================================================
+tts:
+  enabled: true
+  engine: "pyttsx3"              # "pyttsx3" | "gtts" | "auto"
+  language: "ko"
+  rate: 150                      # pyttsx3 말하기 속도
+  volume: 0.9                    # 0.0 ~ 1.0

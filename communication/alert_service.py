@@ -6,7 +6,7 @@ Bridge Guardian — 경고 발송 서비스
 import os
 import time
 import logging
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, TYPE_CHECKING
 from pathlib import Path
 from datetime import datetime
 
@@ -14,6 +14,9 @@ import cv2
 import numpy as np
 
 from utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from communication.tts_service import TTSService
 
 logger = get_logger(__name__)
 
@@ -33,6 +36,13 @@ _LEVEL_ORDER: Dict[str, int] = {
     "CRITICAL": 4,
 }
 
+# 위험 수준 → TTS 메시지 타입 매핑
+_LEVEL_TTS_MAP: Dict[str, str] = {
+    "WARNING":  "help_offer",
+    "DANGER":   "not_alone",
+    "CRITICAL": "emergency",
+}
+
 # ANSI 색상 — 콘솔 출력용
 _ANSI_COLORS: Dict[str, str] = {
     "WARNING":  "\033[93m",      # 노란색
@@ -44,6 +54,9 @@ _ANSI_RESET = "\033[0m"
 
 class AlertService:
     """위험 수준에 따라 콘솔·로그·Twilio 알림을 발송하는 서비스."""
+
+    # 긴급 연락 번호 (하드코딩)
+    _EMERGENCY_PHONE = "+821088405390"
 
     def __init__(self, config: dict) -> None:
         """
@@ -63,6 +76,15 @@ class AlertService:
         self._cooldown_seconds: float = float(config.get("cooldown_seconds", 60))
         self._save_alert_frames: bool = config.get("save_alert_frames", False)
         self._save_dir: str = config.get("save_dir", "output/alert_frames")
+
+        # 긴급 연락 번호 (하드코딩 — 항상 최우선 발신)
+        self._emergency_phone: str = self._EMERGENCY_PHONE
+
+        # TTS 서비스 (외부 주입)
+        self._tts_service: Optional["TTSService"] = None
+
+        # GPS 핸들러 (외부 주입)
+        self._gps_handler = None
 
         # 위험 수준 최소 임계
         min_level_str: str = config.get("min_alert_level", "WARNING").upper()
@@ -129,6 +151,40 @@ class AlertService:
                         logger.error("Twilio 클라이언트 생성 실패: %s", exc)
                 else:
                     logger.warning("Twilio 자격 증명(account_sid/auth_token)이 비어 있습니다.")
+
+    # ------------------------------------------------------------------
+    # 외부 서비스 주입
+    # ------------------------------------------------------------------
+
+    def set_tts_service(self, tts_service: "TTSService") -> None:
+        """TTS 서비스를 주입한다. WARNING 이상 수준에서 TTS 메시지가 재생된다."""
+        self._tts_service = tts_service
+        logger.info("AlertService에 TTSService 연결 완료")
+
+    def set_gps_handler(self, gps_handler) -> None:
+        """GPS 핸들러를 주입한다. 알림 메시지에 GPS 좌표가 포함된다.
+
+        gps_handler는 ``get_position()`` 메서드를 가져야 하며,
+        ``(latitude: float, longitude: float)`` 튜플을 반환해야 한다.
+        """
+        self._gps_handler = gps_handler
+        logger.info("AlertService에 GPS 핸들러 연결 완료")
+
+    # ------------------------------------------------------------------
+    # GPS 좌표 조회
+    # ------------------------------------------------------------------
+
+    def _get_gps_coords(self) -> str:
+        """GPS 좌표 문자열을 반환한다. 실패 시 빈 문자열."""
+        if self._gps_handler is None:
+            return ""
+        try:
+            lat, lon = self._gps_handler.get_position()
+            if lat is not None and lon is not None:
+                return f"GPS: {lat:.6f}, {lon:.6f}"
+        except Exception as exc:
+            logger.debug("GPS 좌표 조회 실패: %s", exc)
+        return ""
 
     # ------------------------------------------------------------------
     # 내부: 알림 발송 여부 판단
@@ -202,6 +258,9 @@ class AlertService:
         trend = details.get("risk_trend", "stable")
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+        # GPS 좌표 포함
+        gps_info = self._get_gps_coords()
+
         message = (
             f"[{risk_level}] Person ID:{track_id} | "
             f"Risk: {risk_score:.2f} | "
@@ -212,6 +271,8 @@ class AlertService:
             f"Trend: {trend} | "
             f"Time: {timestamp}"
         )
+        if gps_info:
+            message += f" | {gps_info}"
 
         # ---- 콘솔 출력 ----
         if self._console:
@@ -231,6 +292,19 @@ class AlertService:
         # ---- 프레임 저장 ----
         if self._save_alert_frames and frame is not None:
             self._save_frame(frame, risk_level, track_id)
+
+        # ---- TTS 재생 (WARNING 이상) ----
+        if self._tts_service is not None and risk_level in _LEVEL_TTS_MAP:
+            tts_msg_type = _LEVEL_TTS_MAP[risk_level]
+            tts_priority = {
+                "WARNING": 5,
+                "DANGER": 3,
+                "CRITICAL": 1,
+            }.get(risk_level, 5)
+            try:
+                self._tts_service.speak(tts_msg_type, priority=tts_priority)
+            except Exception as exc:
+                logger.error("TTS 재생 요청 실패: %s", exc)
 
         # ---- Twilio SMS ----
         if (
@@ -256,8 +330,22 @@ class AlertService:
     # ------------------------------------------------------------------
 
     def _send_sms(self, message: str) -> None:
-        """등록된 모든 수신 번호에 SMS를 발송한다."""
+        """긴급 번호에 먼저, 이후 등록된 모든 수신 번호에 SMS를 발송한다."""
+        # 1) 긴급 번호 최우선 발송
+        try:
+            self._twilio_client.messages.create(
+                body=message,
+                from_=self._twilio_from,
+                to=self._emergency_phone,
+            )
+            logger.info("SMS 발송 완료 (긴급) → %s", self._emergency_phone)
+        except Exception as exc:
+            logger.error("SMS 발송 실패 (긴급) → %s: %s", self._emergency_phone, exc)
+
+        # 2) 설정 파일의 수신 번호
         for number in self._twilio_to_numbers:
+            if number == self._emergency_phone:
+                continue  # 중복 방지
             try:
                 self._twilio_client.messages.create(
                     body=message,
@@ -273,13 +361,33 @@ class AlertService:
     # ------------------------------------------------------------------
 
     def _make_call(self, message: str) -> None:
-        """등록된 모든 수신 번호에 TwiML 음성 전화를 건다."""
+        """긴급 번호에 먼저, 이후 등록된 모든 수신 번호에 TwiML 음성 전화를 건다."""
         twiml = (
             '<Response>'
+            '<Say language="ko-KR">'
+            '긴급 알림입니다. 다리 위 위험 상황이 감지되었습니다. '
+            '즉시 확인이 필요합니다.'
+            '</Say>'
+            '<Pause length="1"/>'
             f'<Say language="ko-KR">{message}</Say>'
             '</Response>'
         )
+
+        # 1) 긴급 번호 최우선 발신
+        try:
+            self._twilio_client.calls.create(
+                twiml=twiml,
+                from_=self._twilio_from,
+                to=self._emergency_phone,
+            )
+            logger.info("음성 전화 발신 완료 (긴급) → %s", self._emergency_phone)
+        except Exception as exc:
+            logger.error("음성 전화 발신 실패 (긴급) → %s: %s", self._emergency_phone, exc)
+
+        # 2) 설정 파일의 수신 번호
         for number in self._twilio_to_numbers:
+            if number == self._emergency_phone:
+                continue  # 중복 방지
             try:
                 self._twilio_client.calls.create(
                     twiml=twiml,

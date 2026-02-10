@@ -20,6 +20,8 @@ class ProximityResult:
     proximity_score: float
     depth_m: Optional[float]
     depth_valid: bool
+    lidar_distance_m: Optional[float] = None
+    lidar_confirmed: bool = False
 
 
 class ProximityDetector:
@@ -139,7 +141,8 @@ class ProximityDetector:
         keypoints: np.ndarray,
         kp_conf: np.ndarray,
         depth_frame: Optional[np.ndarray] = None,
-        camera_handler: Optional[Any] = None
+        camera_handler: Optional[Any] = None,
+        lidar_distance_m: Optional[float] = None,
     ) -> ProximityResult:
         """
         Check if person is in proximity to railing zone.
@@ -150,6 +153,7 @@ class ProximityDetector:
             kp_conf: Keypoint confidence array of shape (17,)
             depth_frame: Optional depth frame for depth validation
             camera_handler: Optional camera handler with get_median_depth_in_bbox method
+            lidar_distance_m: Optional LiDAR distance from sensor fusion (metres)
 
         Returns:
             ProximityResult with proximity information
@@ -168,6 +172,7 @@ class ProximityDetector:
                 base_score = 0.7
                 depth_m = None
                 depth_valid = False
+                lidar_confirmed = False
 
                 # Validate with depth if available
                 if depth_frame is not None and camera_handler is not None:
@@ -192,12 +197,25 @@ class ProximityDetector:
                             depth_valid = False
                     # else: depth_m == 0, keep base_score = 0.7, depth_valid = False
 
+                # LiDAR confirmation: validate with lidar distance if available
+                if lidar_distance_m is not None:
+                    if self.railing_depth_min_m <= lidar_distance_m <= self.railing_depth_max_m:
+                        lidar_confirmed = True
+                        # Boost score when LiDAR confirms proximity
+                        if depth_valid:
+                            base_score = min(1.0, base_score + 0.1)
+                        else:
+                            # LiDAR alone can raise score even without depth
+                            base_score = max(base_score, 0.85)
+
                 return ProximityResult(
                     in_roi=True,
                     zone_name=zone_name,
                     proximity_score=base_score,
                     depth_m=depth_m,
-                    depth_valid=depth_valid
+                    depth_valid=depth_valid,
+                    lidar_distance_m=lidar_distance_m,
+                    lidar_confirmed=lidar_confirmed,
                 )
 
         # Not in any ROI
@@ -206,7 +224,9 @@ class ProximityDetector:
             zone_name="",
             proximity_score=0.0,
             depth_m=None,
-            depth_valid=False
+            depth_valid=False,
+            lidar_distance_m=lidar_distance_m,
+            lidar_confirmed=False,
         )
 
     def get_roi_masks(self) -> List[Tuple[str, np.ndarray]]:
