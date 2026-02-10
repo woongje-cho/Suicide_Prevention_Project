@@ -1,0 +1,84 @@
+# ============================================================
+# Bridge Guardian — 자살 예방 순찰 로봇 설정 파일
+# ============================================================
+
+camera:
+  source: "realsense"          # "realsense" 또는 비디오 파일 경로 (예: "test_video.mp4")
+  width: 640
+  height: 480
+  fps: 30
+  depth_width: 640
+  depth_height: 480
+
+detection:
+  model_path: "yolov8n-pose.pt"   # .pt (개발) 또는 .engine (Jetson TensorRT)
+  confidence: 0.5
+  iou_threshold: 0.45
+  device: 0                       # GPU 인덱스 또는 "cpu"
+  input_size: 640
+  tracker_config: "bytetrack.yaml"
+
+tracking:
+  max_age_seconds: 3.0            # 감지 안되면 트랙 삭제까지의 시간
+  position_history_size: 150      # ~5초 (30fps 기준)
+  keypoint_history_size: 30       # ~1초
+
+risk_assessment:
+  # ROI 영역: 정규화 좌표 [0-1]로 정의된 난간/가장자리 다각형
+  railing_roi_zones:
+    - name: "left_railing"
+      polygon: [[0.0, 0.3], [0.15, 0.3], [0.15, 0.9], [0.0, 0.9]]
+    - name: "right_railing"
+      polygon: [[0.85, 0.3], [1.0, 0.3], [1.0, 0.9], [0.85, 0.9]]
+  railing_depth_min_m: 0.5
+  railing_depth_max_m: 3.0
+
+  stationary_time_threshold_s: 30
+  stationary_movement_threshold_px: 25
+
+  climbing_knee_hip_ratio: 0.15
+  climbing_leg_angle_threshold: 160
+  climbing_temporal_window: 15
+  torso_lean_threshold_deg: 25
+  shoulder_width_ratio_side: 0.08
+  keypoint_confidence_min: 0.3
+
+  weights:
+    stationary_time: 0.30
+    railing_proximity: 0.35
+    dangerous_pose: 0.35
+
+  time_multipliers:
+    dawn:    { start: 4,  end: 6,  multiplier: 1.5 }
+    night:   { start: 22, end: 4,  multiplier: 1.3 }
+    default: 1.0
+
+  risk_levels:
+    observe: 0.3
+    warning: 0.5
+    danger: 0.7
+    critical: 0.85
+
+alerts:
+  enabled: true
+  console: true
+  log_file: "alerts.log"
+  min_alert_level: "WARNING"
+  cooldown_seconds: 60
+  twilio:
+    enabled: false
+    account_sid: ""                # 환경변수 TWILIO_ACCOUNT_SID 사용 권장
+    auth_token: ""                 # 환경변수 TWILIO_AUTH_TOKEN 사용 권장
+    from_number: ""
+    to_numbers: []
+    call_on_critical: true
+    sms_on_warning: true
+
+visualization:
+  enabled: true
+  show_skeleton: true
+  show_roi_zones: true
+  show_risk_labels: true
+  show_fps: true
+  save_alert_frames: true
+  save_dir: "alert_captures"
