@@ -23,6 +23,7 @@ logger = get_logger(__name__)
 # Twilio는 선택적 의존성 — 없어도 정상 동작
 try:
     from twilio.rest import Client as TwilioClient
+
     _TWILIO_AVAILABLE = True
 except ImportError:
     _TWILIO_AVAILABLE = False
@@ -38,16 +39,16 @@ _LEVEL_ORDER: Dict[str, int] = {
 
 # 위험 수준 → TTS 메시지 타입 매핑
 _LEVEL_TTS_MAP: Dict[str, str] = {
-    "WARNING":  "help_offer",
-    "DANGER":   "not_alone",
+    "WARNING": "help_offer",
+    "DANGER": "not_alone",
     "CRITICAL": "emergency",
 }
 
 # ANSI 색상 — 콘솔 출력용
 _ANSI_COLORS: Dict[str, str] = {
-    "WARNING":  "\033[93m",      # 노란색
-    "DANGER":   "\033[91m",      # 빨간색
-    "CRITICAL": "\033[1;91m",    # 굵은 빨간색
+    "WARNING": "\033[93m",  # 노란색
+    "DANGER": "\033[91m",  # 빨간색
+    "CRITICAL": "\033[1;91m",  # 굵은 빨간색
 }
 _ANSI_RESET = "\033[0m"
 
@@ -146,11 +147,16 @@ class AlertService:
                     try:
                         self._twilio_client = TwilioClient(account_sid, auth_token)
                         self._twilio_enabled = True
-                        logger.info("Twilio 클라이언트 초기화 완료 (수신 번호 %d개)", len(self._twilio_to_numbers))
+                        logger.info(
+                            "Twilio 클라이언트 초기화 완료 (수신 번호 %d개)",
+                            len(self._twilio_to_numbers),
+                        )
                     except Exception as exc:
                         logger.error("Twilio 클라이언트 생성 실패: %s", exc)
                 else:
-                    logger.warning("Twilio 자격 증명(account_sid/auth_token)이 비어 있습니다.")
+                    logger.warning(
+                        "Twilio 자격 증명(account_sid/auth_token)이 비어 있습니다."
+                    )
 
     # ------------------------------------------------------------------
     # 외부 서비스 주입
@@ -179,9 +185,9 @@ class AlertService:
         if self._gps_handler is None:
             return ""
         try:
-            lat, lon = self._gps_handler.get_position()
-            if lat is not None and lon is not None:
-                return f"GPS: {lat:.6f}, {lon:.6f}"
+            data = self._gps_handler.get_current()
+            if data.has_fix:
+                return f"GPS: {data.latitude:.6f}, {data.longitude:.6f}"
         except Exception as exc:
             logger.debug("GPS 좌표 조회 실패: %s", exc)
         return ""
@@ -315,11 +321,7 @@ class AlertService:
             self._send_sms(message)
 
         # ---- Twilio 전화 ----
-        if (
-            self._twilio_enabled
-            and self._call_on_critical
-            and risk_level == "CRITICAL"
-        ):
+        if self._twilio_enabled and self._call_on_critical and risk_level == "CRITICAL":
             self._make_call(message)
 
         # ---- 쿨다운 갱신 ----
@@ -363,14 +365,14 @@ class AlertService:
     def _make_call(self, message: str) -> None:
         """긴급 번호에 먼저, 이후 등록된 모든 수신 번호에 TwiML 음성 전화를 건다."""
         twiml = (
-            '<Response>'
+            "<Response>"
             '<Say language="ko-KR">'
-            '긴급 알림입니다. 다리 위 위험 상황이 감지되었습니다. '
-            '즉시 확인이 필요합니다.'
-            '</Say>'
+            "긴급 알림입니다. 다리 위 위험 상황이 감지되었습니다. "
+            "즉시 확인이 필요합니다."
+            "</Say>"
             '<Pause length="1"/>'
             f'<Say language="ko-KR">{message}</Say>'
-            '</Response>'
+            "</Response>"
         )
 
         # 1) 긴급 번호 최우선 발신
@@ -382,7 +384,9 @@ class AlertService:
             )
             logger.info("음성 전화 발신 완료 (긴급) → %s", self._emergency_phone)
         except Exception as exc:
-            logger.error("음성 전화 발신 실패 (긴급) → %s: %s", self._emergency_phone, exc)
+            logger.error(
+                "음성 전화 발신 실패 (긴급) → %s: %s", self._emergency_phone, exc
+            )
 
         # 2) 설정 파일의 수신 번호
         for number in self._twilio_to_numbers:
@@ -425,10 +429,7 @@ class AlertService:
         """만료된 쿨다운 항목(2× cooldown_seconds 경과)을 제거한다."""
         now = time.time()
         cutoff = self._cooldown_seconds * 2
-        expired = [
-            tid for tid, (ts, _) in self._cooldowns.items()
-            if now - ts > cutoff
-        ]
+        expired = [tid for tid, (ts, _) in self._cooldowns.items() if now - ts > cutoff]
         for tid in expired:
             del self._cooldowns[tid]
         if expired:

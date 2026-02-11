@@ -32,6 +32,7 @@ _SERIAL_AVAILABLE = False
 
 try:
     from rplidar import RPLidar, RPLidarException
+
     _RPLIDAR_AVAILABLE = True
 except ImportError:
     RPLidar = None  # type: ignore
@@ -41,10 +42,13 @@ except ImportError:
 if not _RPLIDAR_AVAILABLE:
     try:
         import serial
+
         _SERIAL_AVAILABLE = True
     except ImportError:
         serial = None  # type: ignore
-        logger.warning("pyserial not installed — LiDAR hardware unavailable, dummy mode only")
+        logger.warning(
+            "pyserial not installed — LiDAR hardware unavailable, dummy mode only"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +57,8 @@ if not _RPLIDAR_AVAILABLE:
 @dataclass
 class LidarScan:
     """Container for a single 360-degree LiDAR scan."""
-    ranges: List[float] = field(default_factory=lambda: [float('inf')] * 360)
+
+    ranges: List[float] = field(default_factory=lambda: [float("inf")] * 360)
     intensities: List[float] = field(default_factory=lambda: [0.0] * 360)
     timestamp: float = 0.0
     valid: bool = False
@@ -62,9 +67,10 @@ class LidarScan:
 @dataclass
 class LidarDetection:
     """A detected object cluster from LiDAR data."""
-    angle_deg: float           # centre angle of detection [0, 360)
-    distance_m: float          # distance from sensor in metres
-    cluster_size: int          # number of consecutive scan points in cluster
+
+    angle_deg: float  # centre angle of detection [0, 360)
+    distance_m: float  # distance from sensor in metres
+    cluster_size: int  # number of consecutive scan points in cluster
     is_person_candidate: bool  # heuristic: cluster width consistent with a person
 
 
@@ -123,7 +129,10 @@ class LidarHandler:
 
         logger.info(
             "LidarHandler created (mode=%s, port=%s, range=[%.2f, %.2f]m)",
-            self._mode, self._port, self._range_min, self._range_max,
+            self._mode,
+            self._port,
+            self._range_min,
+            self._range_max,
         )
 
     # ------------------------------------------------------------------
@@ -144,11 +153,17 @@ class LidarHandler:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def start(self) -> None:
-        """Initialise hardware and start the background scan thread."""
+    def start(self) -> bool:
+        """Initialise hardware and start the background scan thread.
+
+        Returns
+        -------
+        bool
+            True if started successfully, False otherwise.
+        """
         if self._running:
             logger.warning("LidarHandler already running")
-            return
+            return True
 
         if self._mode == "rplidar":
             self._init_rplidar()
@@ -158,9 +173,12 @@ class LidarHandler:
             logger.info("LiDAR running in dummy mode — no hardware")
 
         self._running = True
-        self._thread = threading.Thread(target=self._scan_loop, daemon=True, name="lidar-scan")
+        self._thread = threading.Thread(
+            target=self._scan_loop, daemon=True, name="lidar-scan"
+        )
         self._thread.start()
         logger.info("LiDAR background scan thread started (mode=%s)", self._mode)
+        return True
 
     def stop(self) -> None:
         """Stop scanning and release hardware resources."""
@@ -248,12 +266,14 @@ class LidarHandler:
 
             is_person = self._person_w_min <= arc_width_m <= self._person_w_max
 
-            detections.append(LidarDetection(
-                angle_deg=centre_angle,
-                distance_m=min_dist,
-                cluster_size=len(cluster),
-                is_person_candidate=is_person,
-            ))
+            detections.append(
+                LidarDetection(
+                    angle_deg=centre_angle,
+                    distance_m=min_dist,
+                    cluster_size=len(cluster),
+                    is_person_candidate=is_person,
+                )
+            )
 
         detections.sort(key=lambda d: d.distance_m)
         return detections
@@ -284,7 +304,7 @@ class LidarHandler:
         start = (centre_deg - half) % 360
         end = (centre_deg + half) % 360
 
-        nearest = float('inf')
+        nearest = float("inf")
         for i in range(360):
             # Check if angle i is inside [start, end] (handling wrap)
             if start <= end:
@@ -297,7 +317,7 @@ class LidarHandler:
                 if self._range_min <= r <= self._range_max and r < nearest:
                     nearest = r
 
-        return nearest if nearest < float('inf') else None
+        return nearest if nearest < float("inf") else None
 
     # ------------------------------------------------------------------
     # Hardware initialisation
@@ -309,11 +329,17 @@ class LidarHandler:
             self._lidar = RPLidar(self._port, baudrate=self._baudrate)
             info = self._lidar.get_info()
             health = self._lidar.get_health()
-            logger.info("RPLidar connected — model=%s, firmware=%s, health=%s",
-                        info.get('model', '?'), info.get('firmware', '?'), health[0])
+            logger.info(
+                "RPLidar connected — model=%s, firmware=%s, health=%s",
+                info.get("model", "?"),
+                info.get("firmware", "?"),
+                health[0],
+            )
             self._scan_generator = self._lidar.iter_scans()
         except Exception as exc:
-            logger.error("Failed to initialise RPLidar: %s — falling back to dummy mode", exc)
+            logger.error(
+                "Failed to initialise RPLidar: %s — falling back to dummy mode", exc
+            )
             self._mode = "dummy"
             self._lidar = None
 
@@ -321,13 +347,17 @@ class LidarHandler:
         """Minimal serial fallback (placeholder for custom protocol)."""
         try:
             self._lidar = serial.Serial(
-                self._port, self._baudrate,
+                self._port,
+                self._baudrate,
                 timeout=1.0,
             )
             logger.info("Serial LiDAR connection opened on %s", self._port)
         except Exception as exc:
-            logger.error("Failed to open serial port %s: %s — falling back to dummy mode",
-                         self._port, exc)
+            logger.error(
+                "Failed to open serial port %s: %s — falling back to dummy mode",
+                self._port,
+                exc,
+            )
             self._mode = "dummy"
             self._lidar = None
 
@@ -340,7 +370,7 @@ class LidarHandler:
                 self._lidar.stop()
                 self._lidar.stop_motor()
                 self._lidar.disconnect()
-            elif self._mode == "serial" and hasattr(self._lidar, 'close'):
+            elif self._mode == "serial" and hasattr(self._lidar, "close"):
                 self._lidar.close()
             logger.info("LiDAR hardware released")
         except Exception as exc:
@@ -381,7 +411,7 @@ class LidarHandler:
 
         # Convert raw measurements → 360-element arrays
         # raw_scan is list of (quality, angle, distance_mm)
-        ranges = [float('inf')] * 360
+        ranges = [float("inf")] * 360
         intensities = [0.0] * 360
 
         for quality, angle, distance in raw_scan:
@@ -410,7 +440,7 @@ class LidarHandler:
 
     def _generate_dummy_scan(self) -> None:
         """Generate a synthetic scan with 2-3 simulated objects for testing."""
-        ranges = [float('inf')] * 360
+        ranges = [float("inf")] * 360
         intensities = [0.0] * 360
 
         # Simulate objects at known positions for development

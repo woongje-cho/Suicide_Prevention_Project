@@ -88,7 +88,8 @@ visualization:
 # ============================================================
 lidar:
   enabled: true
-  port: "/dev/ttyUSB0"           # Linux/Jetson 시리얼 포트
+  # port: "/dev/ttyUSB0"         # Linux/Jetson
+  port: "COM3"                   # Windows (장치관리자에서 확인)
   baudrate: 115200
   scan_mode: 0                   # 0=Standard, 1=Express, 2=Boost
   max_range_m: 12.0
@@ -116,7 +117,8 @@ sensor_fusion:
 # ============================================================
 gps:
   enabled: true
-  port: "/dev/ttyACM0"
+  # port: "/dev/ttyACM0"         # Linux/Jetson
+  port: "COM4"                   # Windows (장치관리자에서 확인)
   baudrate: 9600
   update_rate_hz: 1
   min_satellites: 4
@@ -128,6 +130,9 @@ gps:
 # ============================================================
 motor:
   enabled: true
+  # port: "/dev/ttyACM0"         # Linux/Jetson
+  port: "COM5"                   # Windows (장치관리자에서 확인)
+  baudrate: 9600
   left_pin_forward: 17
   left_pin_backward: 27
   right_pin_forward: 22
